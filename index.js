@@ -14,8 +14,8 @@ const config = {
   activityType: 'PLAYING',
 
   // ── Application ───────────────────────────────────────────
-  applicationId:   '1445163122284429375',
-  applicationName: "Forza Horizon 6",
+  applicationId:   process.env.APP_ID,
+  applicationName: process.env.APP_NAME,
 
   // ── Details (Line 1) ──────────────────────────────────────
   details:    '',

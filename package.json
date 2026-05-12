@@ -1,7 +1,7 @@
 {
   "name": "fakegame",
   "version": "1.0.0",
-  "main": "fakegame.js",
+  "main": "index.js",
   "scripts": {
     "start": "node --max-old-space-size=256 index.js"
   },

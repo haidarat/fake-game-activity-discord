@@ -1,7 +1,12 @@
 {
+  "name": "fakegame",
+  "version": "1.0.0",
+  "main": "fakegame.js",
+  "scripts": {
+    "start": "node --max-old-space-size=256 index.js"
+  },
   "dependencies": {
-    "debug": "^4.4.3",
-    "discord.js-selfbot-v13": "^3.7.1",
-    "express": "^5.2.1"
+    "discord.js-selfbot-v13": "^3.3.1",
+    "express": "^4.18.2"
   }
 }

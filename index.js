@@ -49,7 +49,7 @@ const config = {
 };
 
 // ============================================================
-//  ✦  EXPRESS SERVER (keeps Render awake)  ✦
+//  ✦  EXPRESS SERVER (keeps host awake)  ✦
 // ============================================================
 
 const BOOT_TIME = new Date();
@@ -81,7 +81,6 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Health-check endpoint (used by uptime monitors like UptimeRobot)
 app.get('/ping', (req, res) => res.send('pong'));
 
 app.listen(PORT, () => {
@@ -89,12 +88,43 @@ app.listen(PORT, () => {
 });
 
 // ============================================================
+//  ✦  IMAGE CACHE (แก้ memory leak)  ✦
+// ============================================================
+
+let cachedLargeImage = null;
+let cachedSmallImage = null;
+
+async function resolveImages() {
+  if (config.largeImageKey) {
+    try {
+      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.largeImageKey);
+      cachedLargeImage = ext.external_asset_path;
+      console.log('🖼️  Large image resolved & cached');
+    } catch {
+      cachedLargeImage = config.largeImageKey;
+      console.log('🖼️  Large image fallback to key');
+    }
+  }
+
+  if (config.smallImageKey) {
+    try {
+      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.smallImageKey);
+      cachedSmallImage = ext.external_asset_path;
+      console.log('🖼️  Small image resolved & cached');
+    } catch {
+      cachedSmallImage = config.smallImageKey;
+      console.log('🖼️  Small image fallback to key');
+    }
+  }
+}
+
+// ============================================================
 //  ✦  HELPER  ✦
 // ============================================================
 
 const START_TIME = Date.now();
 
-async function buildActivity() {
+function buildActivity() {
   const presence = new RichPresence(client)
     .setApplicationId(config.applicationId)
     .setType(config.activityType.toUpperCase())
@@ -111,29 +141,18 @@ async function buildActivity() {
     presence.setStartTimestamp(START_TIME);
   }
 
-  // Large Image
-  if (config.largeImageKey) {
-    try {
-      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.largeImageKey);
-      presence.setAssetsLargeImage(ext.external_asset_path);
-    } catch {
-      presence.setAssetsLargeImage(config.largeImageKey);
-    }
+  // Large Image — ใช้ cache แทน getExternal() ทุกรอบ
+  if (cachedLargeImage) {
+    presence.setAssetsLargeImage(cachedLargeImage);
     if (config.largeImageText) presence.setAssetsLargeText(config.largeImageText);
   }
 
-  // Small Image
-  if (config.smallImageKey) {
-    try {
-      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.smallImageKey);
-      presence.setAssetsSmallImage(ext.external_asset_path);
-    } catch {
-      presence.setAssetsSmallImage(config.smallImageKey);
-    }
+  // Small Image — ใช้ cache แทน getExternal() ทุกรอบ
+  if (cachedSmallImage) {
+    presence.setAssetsSmallImage(cachedSmallImage);
     if (config.smallImageText) presence.setAssetsSmallText(config.smallImageText);
   }
 
-  // Buttons
   if (config.button1Text && config.button1Url) presence.addButton(config.button1Text, config.button1Url);
   if (config.button2Text && config.button2Url) presence.addButton(config.button2Text, config.button2Url);
 
@@ -148,8 +167,11 @@ client.on('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   console.log(`🎮 Setting Custom RPC...`);
 
+  // Resolve images ครั้งเดียวตอน ready แล้ว cache ไว้
+  await resolveImages();
+
   try {
-    const activity = await buildActivity();
+    const activity = buildActivity();
     client.user.setPresence({ activities: [activity], status: 'online' });
     console.log('✨ Custom RPC is now active!');
   } catch (err) {
@@ -157,17 +179,29 @@ client.on('ready', async () => {
   }
 });
 
-// ── Refresh presence every 4 min ────────────────────────────
-setInterval(async () => {
+// ── Refresh presence every 4 min (ไม่เรียก getExternal อีกแล้ว) ──
+setInterval(() => {
   if (!client.user) return;
   try {
-    const activity = await buildActivity();
+    const activity = buildActivity();
     client.user.setPresence({ activities: [activity], status: 'online' });
     console.log(`🔄 Presence refreshed at ${new Date().toLocaleTimeString()}`);
   } catch (err) {
     console.error('❌ Refresh error:', err.message);
   }
 }, 4 * 60 * 1000);
+
+// ============================================================
+//  ✦  ERROR HANDLERS  ✦
+// ============================================================
+
+client.on('error', (err) => {
+  console.error('❌ Client error:', err.message);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled rejection:', err.message);
+});
 
 // ============================================================
 client.login(process.env.TOKEN || '');

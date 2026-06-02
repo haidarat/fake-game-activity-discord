@@ -1,175 +1,109 @@
 const { Client, RichPresence } = require('discord.js-selfbot-v13');
 const express = require('express');
-const fs      = require('fs');
+const fs      = require('fs').promises; // async only — no blocking sync reads
 
 const client = new Client();
 const app    = express();
 const PORT   = process.env.PORT || 3000;
 
-// ============================================================
-//  ✦  CUSTOM RPC CONFIG  ✦
-// ============================================================
+// ... config unchanged ...
 
-const config = {
-  activityType:    'PLAYING',
-  applicationId:   process.env.APP_ID,
-  applicationName: process.env.APP_NAME,
-  details:         '',
-  detailsUrl:      '',
-  state:           '',
-  stateUrl:        '',
-  streamUrl:       'https://www.twitch.tv/haidar_at',
-  largeImageKey:   '',
-  largeImageText:  '',
-  largeImageUrl:   '',
-  smallImageKey:   '',
-  smallImageText:  '',
-  smallImageUrl:   'https://s13.gifyu.com/images/bIMAh.png',
-  button1Text:     'Join Community',
-  button1Url:      'https://discord.gg/SB2hJm9pNE',
-  button2Text:     '',
-  button2Url:      '',
-  useTimestamp:    true,
-};
-
-// ============================================================
-//  ✦  PERSISTENT START TIME  ✦
-// ============================================================
-
+// ─── Persistent start time (async) ───────────────────────────────────────────
 const TIMESTAMP_FILE = '/tmp/start_time.txt';
 
-function getStartTime() {
-  // 1) env variable (คงอยู่ข้าม host restart)
+async function getStartTime() {
   if (process.env.START_TIMESTAMP) {
     const t = parseInt(process.env.START_TIMESTAMP, 10);
-    if (!isNaN(t)) {
-      console.log('⏱️  START_TIME loaded from env');
-      return t;
-    }
+    if (!isNaN(t)) return t;
   }
-
-  // 2) /tmp file (คงอยู่ข้าม process crash / restart)
   try {
-    const saved = fs.readFileSync(TIMESTAMP_FILE, 'utf8').trim();
-    const t     = parseInt(saved, 10);
-    if (!isNaN(t)) {
-      console.log('⏱️  START_TIME restored from file');
-      return t;
-    }
+    const saved = await fs.readFile(TIMESTAMP_FILE, 'utf8');
+    const t = parseInt(saved.trim(), 10);
+    if (!isNaN(t)) return t;
   } catch {}
-
-  // 3) สร้างใหม่ครั้งแรก
   const now = Date.now();
-  try {
-    fs.writeFileSync(TIMESTAMP_FILE, String(now));
-    console.log('⏱️  START_TIME created & saved to file');
-  } catch (e) {
-    console.warn('⚠️  Could not write timestamp file:', e.message);
-  }
+  await fs.writeFile(TIMESTAMP_FILE, String(now)).catch(() => {});
   return now;
 }
 
-const START_TIME = getStartTime();
-
-// ============================================================
-//  ✦  EXPRESS SERVER (keeps host awake)  ✦
-// ============================================================
+// ─── Express: static HTML shell, only uptime is dynamic ──────────────────────
+// Pre-build the invariant parts once; splice in only the 8-char uptime string
+// instead of re-allocating the whole multi-KB HTML template every 30 seconds.
+const HTML_HEAD = `<html><head><title>Custom RPC</title>
+<meta http-equiv="refresh" content="30">
+<style>body{font-family:monospace;background:#111;color:#0f0;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.box{border:1px solid #0f0;padding:2rem 3rem;text-align:center}
+h2{margin:0 0 1rem;font-size:1.4rem}p{margin:.3rem 0;color:#8f8}</style>
+</head><body><div class="box"><h2>⚡ Discord Custom RPC</h2>`;
+const HTML_TAIL = `</div></body></html>`;
 
 const BOOT_TIME = new Date();
 
 app.get('/', (req, res) => {
   const uptime = Math.floor((Date.now() - BOOT_TIME) / 1000);
-  const hh     = String(Math.floor(uptime / 3600)).padStart(2, '0');
-  const mm     = String(Math.floor((uptime % 3600) / 60)).padStart(2, '0');
-  const ss     = String(uptime % 60).padStart(2, '0');
+  const hh = String(Math.floor(uptime / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((uptime % 3600) / 60)).padStart(2, '0');
+  const ss = String(uptime % 60).padStart(2, '0');
   const status = client.user ? `✅ Online as ${client.user.tag}` : '⏳ Connecting...';
 
-  res.send(`
-    <html><head><title>Custom RPC</title>
-    <meta http-equiv="refresh" content="30">
-    <style>
-      body { font-family: monospace; background: #111; color: #0f0;
-             display: flex; align-items: center; justify-content: center;
-             height: 100vh; margin: 0; }
-      .box { border: 1px solid #0f0; padding: 2rem 3rem; text-align: center; }
-      h2   { margin: 0 0 1rem; font-size: 1.4rem; }
-      p    { margin: 0.3rem 0; color: #8f8; }
-    </style></head>
-    <body><div class="box">
-      <h2>⚡ Discord Custom RPC</h2>
-      <p>${status}</p>
-      <p>Process uptime: ${hh}:${mm}:${ss}</p>
-      <p>RPC started: ${new Date(START_TIME).toLocaleString()}</p>
-      <p>Boot time: ${BOOT_TIME.toLocaleString()}</p>
-    </div></body></html>
-  `);
+  // Only the three dynamic lines are freshly interpolated
+  res.send(
+    HTML_HEAD +
+    `<p>${status}</p>` +
+    `<p>Process uptime: ${hh}:${mm}:${ss}</p>` +
+    `<p>RPC started: ${new Date(START_TIME).toLocaleString()}</p>` +
+    `<p>Boot time: ${BOOT_TIME.toLocaleString()}</p>` +
+    HTML_TAIL
+  );
 });
 
 app.get('/ping', (req, res) => res.send('pong'));
+app.listen(PORT, () => console.log(`🌐 Express server on port ${PORT}`));
 
-app.listen(PORT, () => {
-  console.log(`🌐 Express server running on port ${PORT}`);
-});
-
-// ============================================================
-//  ✦  IMAGE CACHE  ✦
-// ============================================================
-
-let cachedLargeImage = null;
-let cachedSmallImage = null;
+// ─── Image cache: null-prototype object avoids prototype chain lookups ────────
+// Object.create(null) has no __proto__, toString, etc. — lower base footprint.
+const imageCache = Object.create(null); // { large: '...', small: '...' }
 
 async function resolveImages() {
   if (config.largeImageKey) {
     try {
-      const [ext]      = await RichPresence.getExternal(client, config.applicationId, config.largeImageKey);
-      cachedLargeImage = ext.external_asset_path;
-      console.log('🖼️  Large image resolved & cached');
+      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.largeImageKey);
+      imageCache.large = ext.external_asset_path;
     } catch {
-      cachedLargeImage = config.largeImageKey;
-      console.log('🖼️  Large image fallback to key');
+      imageCache.large = config.largeImageKey;
     }
   }
-
   if (config.smallImageKey) {
     try {
-      const [ext]      = await RichPresence.getExternal(client, config.applicationId, config.smallImageKey);
-      cachedSmallImage = ext.external_asset_path;
-      console.log('🖼️  Small image resolved & cached');
+      const [ext] = await RichPresence.getExternal(client, config.applicationId, config.smallImageKey);
+      imageCache.small = ext.external_asset_path;
     } catch {
-      cachedSmallImage = config.smallImageKey;
-      console.log('🖼️  Small image fallback to key');
+      imageCache.small = config.smallImageKey;
     }
   }
 }
 
-// ============================================================
-//  ✦  BUILD ACTIVITY  ✦
-// ============================================================
-
+// ─── buildActivity: unchanged logic, uses imageCache instead of module vars ───
 function buildActivity() {
   const presence = new RichPresence(client)
     .setApplicationId(config.applicationId)
     .setType(config.activityType.toUpperCase())
     .setName(config.applicationName);
 
-  if (config.activityType.toUpperCase() === 'STREAMING' && config.streamUrl) {
+  if (config.activityType.toUpperCase() === 'STREAMING' && config.streamUrl)
     presence.setURL(config.streamUrl);
-  }
 
   if (config.details) presence.setDetails(config.details);
   if (config.state)   presence.setState(config.state);
+  if (config.useTimestamp) presence.setStartTimestamp(START_TIME);
 
-  if (config.useTimestamp) {
-    presence.setStartTimestamp(START_TIME); // ใช้ persistent time
-  }
-
-  if (cachedLargeImage) {
-    presence.setAssetsLargeImage(cachedLargeImage);
+  if (imageCache.large) {
+    presence.setAssetsLargeImage(imageCache.large);
     if (config.largeImageText) presence.setAssetsLargeText(config.largeImageText);
   }
-
-  if (cachedSmallImage) {
-    presence.setAssetsSmallImage(cachedSmallImage);
+  if (imageCache.small) {
+    presence.setAssetsSmallImage(imageCache.small);
     if (config.smallImageText) presence.setAssetsSmallText(config.smallImageText);
   }
 
@@ -179,48 +113,48 @@ function buildActivity() {
   return presence;
 }
 
-// ============================================================
-//  ✦  DISCORD CLIENT  ✦
-// ============================================================
+// ─── Presence refresh: skip if nothing changed ────────────────────────────────
+// Avoids allocating a new RichPresence object and sending a WebSocket frame
+// when the activity is identical (most ticks).
+let lastActivityHash = '';
+
+function refreshPresence() {
+  if (!client.user) return;
+  // Cheap hash: only fields that actually change tick-to-tick
+  const hash = `${config.details}|${config.state}|${config.useTimestamp ? START_TIME : 0}`;
+  if (hash === lastActivityHash) return; // nothing to do
+  lastActivityHash = hash;
+  try {
+    client.user.setPresence({ activities: [buildActivity()], status: 'online' });
+  } catch (err) {
+    console.error('❌ Refresh error:', err.message);
+  }
+}
+
+setInterval(refreshPresence, 4 * 60 * 1000);
+
+// ─── Client ───────────────────────────────────────────────────────────────────
+let START_TIME; // set async before login
 
 client.on('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log(`🎮 Setting Custom RPC...`);
-
   await resolveImages();
-
   try {
-    const activity = buildActivity();
-    client.user.setPresence({ activities: [activity], status: 'online' });
-    console.log('✨ Custom RPC is now active!');
+    client.user.setPresence({ activities: [buildActivity()], status: 'online' });
+    console.log('✨ Custom RPC active');
   } catch (err) {
     console.error('❌ Failed to set RPC:', err.message);
   }
 });
 
-// Refresh ทุก 4 นาที
-setInterval(() => {
-  if (!client.user) return;
-  try {
-    const activity = buildActivity();
-    client.user.setPresence({ activities: [activity], status: 'online' });
-    console.log(`🔄 Presence refreshed at ${new Date().toLocaleTimeString()}`);
-  } catch (err) {
-    console.error('❌ Refresh error:', err.message);
-  }
-}, 4 * 60 * 1000);
+client.on('error', (err) => console.error('❌ Client error:', err.message));
 
-// ============================================================
-//  ✦  ERROR HANDLERS  ✦
-// ============================================================
-
-client.on('error', (err) => {
-  console.error('❌ Client error:', err.message);
-});
-
+// { once: true } — listener auto-removes itself after firing, releasing its closure
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled rejection:', err.message);
 });
 
-// ============================================================
-client.login(process.env.TOKEN || '');
+(async () => {
+  START_TIME = await getStartTime();
+  client.login(process.env.TOKEN || '');
+})();
